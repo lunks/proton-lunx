@@ -27,11 +27,20 @@ jobs:
       id: version
       shell: bash
       run: |
-        tag_abbrev=$(git describe --tags --abbrev=0)
+        # git-describe versioning, tolerant of a tag-less history (a fresh hard
+        # fork has no tags until the first release): fall back to the short SHA.
+        if tag_abbrev=$(git describe --tags --abbrev=0 2>/dev/null); then
+          tag_offset=$(git rev-list "$tag_abbrev"..HEAD --count)
+          full_desc=$(git describe --long --tags)
+        else
+          tag_abbrev=$(git rev-parse --short HEAD)
+          tag_offset=0
+          full_desc="$tag_abbrev"
+        fi
         echo "tag_abbrev=$tag_abbrev" >> $GITHUB_OUTPUT
-        echo "tag_offset=$(git rev-list $tag_abbrev..HEAD --count)" >> $GITHUB_OUTPUT
+        echo "tag_offset=$tag_offset" >> $GITHUB_OUTPUT
         echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-        echo "full_desc=$(git describe --long --tags)" >> $GITHUB_OUTPUT
+        echo "full_desc=$full_desc" >> $GITHUB_OUTPUT
         echo "branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}" >> $GITHUB_OUTPUT
 
   build:
@@ -40,4 +49,3 @@ jobs:
     uses: ./.github/workflows/_job_build.yml
     with:
       name: ${{ needs.version.outputs.full_desc }}-${{ needs.version.outputs.branch }}
-

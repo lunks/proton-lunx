@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Pedro Nascimento <pnascimento@gmail.com>
+Date: Sat, 22 Aug 2026 00:00:00 -0300
+Subject: [PATCH] winepulse: Gate Sony haptic retarget to a matching endpoint
+
+The hotplug retarget tracks a single global target ("last device wins") and
+moves every registered Sony haptic stream onto it. When a real DualSense is
+hotplugged while a game is streaming to the virtual controller, the retarget
+yanks the virtual stream onto the real controller's hidden PipeWire parent,
+breaking coexistence (and vice-versa when the virtual endpoint hotplugs).
+
+Narrow the retarget: only move a stream onto a target whose own endpoint
+still matches the stream's original Pulse device name. A virtual-controller
+stream therefore only ever targets the virtual endpoint, and a real-controller
+stream only the real one.
+---
+ dlls/winepulse.drv/pulse.c | 32 ++++++++++++++++++++++++++++++-
+ 1 file changed, 31 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/winepulse.drv/pulse.c b/dlls/winepulse.drv/pulse.c
+--- a/dlls/winepulse.drv/pulse.c
++++ b/dlls/winepulse.drv/pulse.c
+@@ -3052,16 +3052,46 @@ static HRESULT pulse_retarget_dualsense_haptic_stream_path(struct pulse_stream
+     return S_OK;
+ }
+
++static BOOL pulse_dualsense_haptic_target_matches(const char *target, const char *device_name)
++{
++    PhysDevice *dev;
++    BOOL match = FALSE;
++
++    if (!target || !target[0])
++        return FALSE;
++
++    g_phys_lock();
++    LIST_FOR_EACH_ENTRY(dev, &g_phys_speakers, PhysDevice, entry)
++    {
++        if (dev->raw_haptic_target && !strcmp(dev->raw_haptic_target, target)
++                && pulse_device_matches(dev, device_name))
++        {
++            match = TRUE;
++            break;
++        }
++    }
++    g_phys_unlock();
++    return match;
++}
++
+ static void pulse_retarget_dualsense_haptic_streams(const char *target)
+ {
+     struct pulse_stream *stream, *next;
+     char *path;
+
+     if (!(path = make_pipewire_dualsense_haptic_path(target)))
+         return;
+
+     LIST_FOR_EACH_ENTRY_SAFE(stream, next, &dualsense_haptic_streams,
+             struct pulse_stream, dualsense_haptic_entry)
+-        pulse_retarget_dualsense_haptic_stream_path(stream, path);
++    {
++        /* Only move a stream onto a target whose own endpoint still matches
++         * the stream's original Pulse device name. A hotplugged real controller
++         * must never pull a virtual-controller stream onto its hidden PipeWire
++         * parent, and vice-versa. */
++        if (!pulse_dualsense_haptic_target_matches(target, stream->device))
++            continue;
++        pulse_retarget_dualsense_haptic_stream_path(stream, path);
++    }
+     free(path);
+ }
+
+--
+2.50.1

@@ -10,7 +10,7 @@ on:
 jobs:
   proton:
     name: Build ${{ inputs.name }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Cleanup disk space
         uses: endersonmenezes/free-disk-space@v3
@@ -34,7 +34,7 @@ jobs:
       - name: Prepare host
         run: sudo apt update && sudo apt-get install -y ccache fontforge-nox
 
-      - name: Restore cache
+      - name: Restore ccache
         id: ccache-restore
         uses: actions/cache/restore@v4
         with:
@@ -50,26 +50,36 @@ jobs:
           fetch-tags: true
           submodules: false
 
-      - name: Patch
+      - name: "Patch (lunx tree prep: submodules + gates + patches)"
         run: |
-          git submodule update --init --filter=tree:0 --recursive
-          # apply proton-ge-custom patches
-          ./patches/protonprep-valve-staging.sh || true
-          # strip binaries at compile time to save space in the runner
-          patch -Np1 -i ./.github/patches/0001-build-strip-binaries-early.patch
+          # The fork's repo root IS the GE-Proton11-4 tree at the pin (see
+          # source.env); the root commit is the import. lunx-patches.sh does the
+          # shallow submodule fetch (bzip2 URL overridden away from sourceware,
+          # bounded backoff), the wiring gates, the FEX describe --always sed,
+          # the winedmo ffmpeg-8 port, and the xrandr pre-seed. Idempotent.
+          bash tools/lunx-patches.sh
           mkdir ./build
 
       - name: Configure
         working-directory: ./build
         run: |
-          ../configure.sh --build-name=${{ inputs.name }} --container-engine=docker
+          DOCKER_DEFAULT_PLATFORM="linux/arm64" ../configure.sh --build-name=${{ inputs.name }} --target-arch=arm64 --container-engine=docker
 
       - name: Make ${{ inputs.name }}
         working-directory: ./build
         run: |
-          make -j$(nproc) redist
+          # -s + SUPPRESS_WARNINGS=1 quiet the log; J=4 avoids the jobserver
+          # leak into the container's re-entrant make; MAKE=make fixes the
+          # host-make-path in the container.
+          make -s J=4 TARGET_ARCH=arm64 MAKE=make SUPPRESS_WARNINGS=1 redist
 
-      - name: Save cache
+      - name: Repackage as compatibilitytools.d tarball
+        run: |
+          mkdir -p out
+          tar --zstd -cf out/proton-lunx-${{ inputs.name }}.tar.zst -C build ${{ inputs.name }}
+          sha512sum out/proton-lunx-${{ inputs.name }}.tar.zst > out/proton-lunx-${{ inputs.name }}.tar.zst.sha512sum
+
+      - name: Save ccache
         id: ccache-save
         if: always()
         uses: actions/cache/save@v4
@@ -77,15 +87,14 @@ jobs:
           path: ~/.ccache
           key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
 
-      - name: Upload artifact ${{ inputs.name }}.tar.gz
+      - name: Upload artifact proton-lunx-${{ inputs.name }}.tar.zst
         uses: actions/upload-artifact@v5
         with:
-          name: ${{ inputs.name }}.tar.gz
-          path: ./build/${{ inputs.name }}.tar.gz
+          name: proton-lunx-${{ inputs.name }}.tar.zst
+          path: ./out/proton-lunx-${{ inputs.name }}.tar.zst
 
-      - name: Upload artifact ${{ inputs.name }}.sha512sum
+      - name: Upload artifact proton-lunx-${{ inputs.name }}.tar.zst.sha512sum
         uses: actions/upload-artifact@v5
         with:
-          name: ${{ inputs.name }}.sha512sum
-          path: ./build/${{ inputs.name }}.sha512sum
-
+          name: proton-lunx-${{ inputs.name }}.tar.zst.sha512sum
+          path: ./out/proton-lunx-${{ inputs.name }}.tar.zst.sha512sum

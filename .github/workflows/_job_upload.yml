@@ -16,8 +16,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - file: ${{ inputs.name }}.tar.gz
-          - file: ${{ inputs.name }}.sha512sum
+          - file: proton-lunx-${{ inputs.name }}.tar.zst
+          - file: proton-lunx-${{ inputs.name }}.tar.zst.sha512sum
 
     runs-on: ubuntu-latest
 
