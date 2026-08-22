@@ -55,8 +55,10 @@ jobs:
           # The fork's repo root IS the GE-Proton11-4 tree at the pin (see
           # source.env); the root commit is the import. lunx-patches.sh does the
           # shallow submodule fetch (bzip2 URL overridden away from sourceware,
-          # bounded backoff), the wiring gates, the FEX describe --always sed,
-          # the winedmo ffmpeg-8 port, and the xrandr pre-seed. Idempotent.
+          # bounded backoff), then runs GE's protonprep patch stack (patches/
+          # protonprep-valve-staging.sh, same as upstream GE) with a hard gate on
+          # the ds5-haptic marker, the wiring gates, the FEX describe --always
+          # sed, and the xrandr pre-seed. Idempotent.
           bash tools/lunx-patches.sh
           mkdir ./build
 

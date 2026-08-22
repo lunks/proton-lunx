@@ -11,12 +11,22 @@
 # lunx-base package there is no separate "carried patches" dir to prove
 # byte-identical — the tree's own patches/ are the pinned bytes. The lunx
 # additions here are:
-#   patches/wine/0001-winedmo-pcm-byte-order-reverse-bsf-ffmpeg8.patch
-#       (the ffmpeg >= 7.0 BSF port for winedmo, applied to the wine submodule)
+#   ./patches/protonprep-valve-staging.sh
+#       (GE's own patch-stack applier, run exactly as upstream GE's
+#       _job_build.yml does — applies wine-wayland, wine-staging, game-patches,
+#       ge-video-rework, proton/, dxvk/layered-overlay-dxvk.patch, and the
+#       proton-ds5-haptic series. `|| true` mirrors GE: protonprep has branches
+#       that fail benignly (missing steam_helper/umu_helper, shallow-wine
+#       revert); the ds5-haptic hard gate below is what proves the load-bearing
+#       series landed.)
 #   patches/proton-ds5-haptic/0130-winepulse-gate-sony-haptic-retarget-to-matching-endpoint.patch
 #       (the locally-authored US-82 follow-on, committed directly into the
-#       tree's proton-ds5-haptic/ dir so GE's sorted-glob patch apply picks it
-#       up after 0118)
+#       tree's proton-ds5-haptic/ dir so protonprep's sorted-glob patch apply
+#       picks it up after 0120)
+#   patches/wine/0001-winedmo-pcm-byte-order-reverse-bsf-ffmpeg8.patch
+#       (kept for provenance ONLY — no longer applied separately; protonprep's
+#       ge-video-rework provides the same WineFFBitStreamFilter port, and
+#       applying both would conflict)
 #   patches/pipewire/0001-alsa-pcm-support-aux-channel-map.patch
 #       (already ships in the GE tree at the pin; committed copy is provenance)
 #
@@ -60,13 +70,29 @@ done
     echo "ERROR: proton-lunx: submodule fetch failed ${SUB_RETRIES}/${SUB_RETRIES} attempts — sourceware 429 not clearing" >&2
     exit 1; }
 
-# -- 0130 follow-on is committed directly into the tree's patches dir --------
-# (no build-time inject needed, unlike the lunx-base package where it lived in
-# a separate carried dir). GE's sorted-glob patch apply (patches/protonprep-
-# valve-staging.sh, run inside `make redist`) picks it up after 0118.
-[ -f patches/proton-ds5-haptic/0130-*.patch ] || {
-    echo "ERROR: proton-lunx: 0130 follow-on missing from patches/proton-ds5-haptic/" >&2
+# -- GE patch stack via protonprep (user directive 2026-08-22) ----------------
+# The fork was building STOCK wine: nothing applied patches/proton-ds5-haptic/
+# (127 files + 0130), wine-wayland, wine-staging, game-patches, ge-video-rework,
+# proton/, or dxvk/layered-overlay-dxvk.patch — the only applier is
+# protonprep-valve-staging.sh, which the fork never ran (diagnosis
+# task-us92-patchgap-diagnose.md). Run it exactly as upstream GE does.
+# NOTE: `|| true` mirrors GE's own workflow — protonprep has branches that fail
+# benignly (missing steam_helper/umu_helper, shallow-wine revert). The HARD gate
+# below on the ds5-haptic marker is what proves the load-bearing series landed.
+./patches/protonprep-valve-staging.sh || true
+
+# HARD GATE: the ds5-haptic series must actually be in the wine tree. Grep for
+# the marker string that ONLY exists if the series applied. We use
+# pulse_dualsense_haptic_target_matches — a function ADDED by the locally
+# authored 0130 follow-on (US-82), which in turn depends on 0116/0118/0120
+# having applied first. It is a `+` addition in the patch (not a context line),
+# so a stock wine tree cannot contain it. If absent, the build is stock wine
+# again — fail loudly. (The path is wine/dlls/winepulse.drv/pulse.c — the
+# winepulse.drv PE-extension dir, not dlls/winepulse.)
+grep -q 'pulse_dualsense_haptic_target_matches' wine/dlls/winepulse.drv/pulse.c || {
+    echo "ERROR: proton-lunx: protonprep did not apply the ds5-haptic series — 'pulse_dualsense_haptic_target_matches' missing from wine/dlls/winepulse.drv/pulse.c" >&2
     exit 1; }
+echo "==> proton-lunx: GE patch stack applied via protonprep (ds5-haptic marker present)"
 
 # -- proton-script wiring gate ----------------------------------------------
 # The script at the pin must resolve PROTON_PIPEWIRE_ALSA_PLUGIN to
@@ -104,30 +130,6 @@ sed 's|git -C $(SRCDIR)/FEX describe --abbrev=7|git -C $(SRCDIR)/FEX describe --
     exit 1; }
 echo "==> proton-lunx: FEX describe is --always (shallow-submodule safe; Makefile.in:996+1008 rewritten)"
 
-# -- wine/ffmpeg compat: port winedmo's BSF to the ffmpeg >= 7.0 API ---------
-# Wine @36078f5 vendors dlls/winedmo/libavcodec/pcm_byte_order_reverse_bsf.c
-# written against the PRE-7.0 BSF API, which does not compile against GE's
-# ffmpeg 8.1 pin (@9047fa1). GE itself ports this file in
-# patches/ge-video-rework/0001-* via protonprep; the lunx build does not run
-# protonprep, so we carry GE's proven WineFFBitStreamFilter port here as a
-# patch and apply it idempotently.
-# Idempotent: reverse-check first so retries skip cleanly; hard-fail if the
-# patch neither applies nor reverses (a wine rebase that changed these files).
-# Absolute path from REPO_ROOT: `git -C wine apply` resolves its patch path
-# RELATIVE TO THE WINE SUBMODULE, not the repo root — a relative
-# "patches/wine/..." here was the run-32583142395 failure
-# ("can't open patch ... : No such file or directory").
-WINE_WINEDMO_PATCH="${REPO_ROOT}/patches/wine/0001-winedmo-pcm-byte-order-reverse-bsf-ffmpeg8.patch"
-if git -C wine apply --reverse --check "${WINE_WINEDMO_PATCH}" 2>/dev/null; then
-    echo "==> proton-lunx: winedmo BSF ffmpeg-8 port already applied (idempotent retry)"
-elif git -C wine apply --check "${WINE_WINEDMO_PATCH}"; then
-    git -C wine apply "${WINE_WINEDMO_PATCH}"
-    echo "==> proton-lunx: winedmo BSF ported to ffmpeg >= 7.0 API"
-else
-    echo "ERROR: proton-lunx: winedmo BSF ffmpeg-8 port patch neither cleanly applied nor cleanly reversible" >&2
-    exit 1
-fi
-
 # -- xrandr tarball pre-seed: GE's bare wget (Makefile.in:1517) has no retry
 #    budget past wget's own --tries=20 default, and xorg.freedesktop.org
 #    (www.x.org's redirect target) times out from the runner's IP. Pre-seed the
@@ -159,4 +161,13 @@ seed_xrandr() {
 }
 seed_xrandr
 
-echo "==> proton-lunx: tree prep complete (submodules + gates + patches)"
+# -- 0130 follow-on is committed directly into the tree's patches dir --------
+# (no build-time inject needed, unlike the lunx-base package where it lived in
+# a separate carried dir). protonprep (run above) globs patches/proton-ds5-haptic/
+# in sorted order, so the locally-authored 0130 follow-on is applied right after
+# 0120. This check just proves the file is present so the glob picks it up.
+[ -f patches/proton-ds5-haptic/0130-*.patch ] || {
+    echo "ERROR: proton-lunx: 0130 follow-on missing from patches/proton-ds5-haptic/" >&2
+    exit 1; }
+
+echo "==> proton-lunx: tree prep complete (submodules + protonprep stack + gates)"
