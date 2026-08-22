@@ -19,8 +19,6 @@ jobs:
           remove_dotnet: true
           remove_haskell: true
           remove_tool_cache: true
-          remove_codeql: true
-          remove_docker_images: true
           remove_swap: true
           remove_packages: |
             azure-cli google-cloud-cli google-chrome-stable firefox microsoft-edge-stable
