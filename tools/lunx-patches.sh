@@ -135,12 +135,16 @@ fi
 #    $(SRC) == the GE tree) with a bounded backoff; GE's rule then finds the
 #    file present and skips wget entirely. Best-effort: if all 5 tries fail we
 #    let GE's own wget have its shot.
+# --timeout=20 --tries=3 --waitretry=5 are load-bearing: without a --timeout a
+#    STALLED connection hangs wget forever (run 32584488788 stuck here), so the
+#    "bounded backoff" never reaches a backoff.
 seed_xrandr() {
     local dst="contrib/xrandr-1.5.4.tar.xz" i
     [ -f "${dst}" ] && return 0
     mkdir -p contrib
     for i in 1 2 3 4 5; do
-        if wget --no-use-server-timestamps -O "${dst}.part" \
+        if wget --timeout=20 --tries=3 --waitretry=5 --no-use-server-timestamps \
+                -O "${dst}.part" \
                 "https://xorg.freedesktop.org/archive/individual/app/xrandr-1.5.4.tar.xz" 2>/dev/null; then
             mv "${dst}.part" "${dst}"
             echo "==> proton-lunx: pre-seeded contrib/xrandr-1.5.4.tar.xz (178K)"
