@@ -38,10 +38,14 @@ jobs:
         if gh release view "${{ github.ref_name }}" --repo "${{ github.server_url }}/${{ github.repository }}" &>/dev/null; then
           echo "Release ${{ github.ref_name }} already exists. Skipping creation."
         else
+          # `--notes-from-tag` is rejected when `--repo` is also given ("using
+          # `--notes-from-tag` with `--repo` is not supported") — run 32594514311
+          # built the tarball but the Release job failed here and the asset was
+          # never published. Drop --notes-from-tag; pin the body to the tag name.
           gh release create "${{ github.ref_name }}" \
             --latest \
             --title "${{ github.ref_name }} Released" \
-            --notes-from-tag \
+            --notes "${{ github.ref_name }}" \
             --verify-tag \
             --repo "${{ github.server_url }}/${{ github.repository }}"
         fi
