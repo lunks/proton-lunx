@@ -113,7 +113,11 @@ echo "==> proton-lunx: FEX describe is --always (shallow-submodule safe; Makefil
 # patch and apply it idempotently.
 # Idempotent: reverse-check first so retries skip cleanly; hard-fail if the
 # patch neither applies nor reverses (a wine rebase that changed these files).
-WINE_WINEDMO_PATCH="patches/wine/0001-winedmo-pcm-byte-order-reverse-bsf-ffmpeg8.patch"
+# Absolute path from REPO_ROOT: `git -C wine apply` resolves its patch path
+# RELATIVE TO THE WINE SUBMODULE, not the repo root — a relative
+# "patches/wine/..." here was the run-32583142395 failure
+# ("can't open patch ... : No such file or directory").
+WINE_WINEDMO_PATCH="${REPO_ROOT}/patches/wine/0001-winedmo-pcm-byte-order-reverse-bsf-ffmpeg8.patch"
 if git -C wine apply --reverse --check "${WINE_WINEDMO_PATCH}" 2>/dev/null; then
     echo "==> proton-lunx: winedmo BSF ffmpeg-8 port already applied (idempotent retry)"
 elif git -C wine apply --check "${WINE_WINEDMO_PATCH}"; then
